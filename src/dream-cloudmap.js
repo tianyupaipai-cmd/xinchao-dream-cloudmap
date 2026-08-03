@@ -16,24 +16,60 @@ export function normalizeDreams(input) {
   }).sort((left, right) => Date.parse(left.createdAt || '') - Date.parse(right.createdAt || ''));
 }
 
-export function dreamPosition(index, count) {
+// 用 id（或下标）生成 0..1 的确定性抖动。
+// 同一个梦每次都落在同一处——她要能认出"那朵云"，但整片天不能像队列。
+export function jitter(seed, salt) {
+  let hash = salt >>> 0;
+  const text = String(seed ?? '');
+  for (let i = 0; i < text.length; i += 1) hash = (Math.imul(hash, 31) + text.charCodeAt(i)) >>> 0;
+  // >>> 0 不能省：^ 返回有符号整数，中文标题会溢出成负数
+  return (((hash ^ (hash >>> 13)) >>> 0) % 100000) / 100000;
+}
+
+export function dreamPosition(index, count, seed = index) {
   const safeCount = Math.max(1, count);
   const age = safeCount === 1 ? 0 : 1 - index / (safeCount - 1);
-  const theta = (index / safeCount) * Math.PI * 2 - Math.PI * .32;
-  const radius = 380 + age * 430;
+
+  // 抖动幅度都小于相邻两级的间距，"越旧越远越高越小"的秩序不会被打乱
+  const heightStep = 290 / Math.max(1, safeCount - 1);   // 相邻两级的高度差
+  const wobbleTheta = (jitter(seed, 7) - .5) * (Math.PI * 1.15 / safeCount);
+  const wobbleRadius = (jitter(seed, 11) - .5) * 150;
+  // 抖动跟着数据量缩放：云该散开，但"越旧越高"的整体趋势不能垮
+  const wobbleHeight = (jitter(seed, 3) - .5) * Math.min(96, heightStep * 1.5);
+  const wobbleSize = (jitter(seed, 17) - .5) * 18;
+
+  const theta = (index / safeCount) * Math.PI * 2 - Math.PI * .32 + wobbleTheta;
+  const radius = 380 + age * 430 + wobbleRadius;
   return {
     age,
     x: Math.sin(theta) * radius,
-    y: -60 - age * 290 + Math.sin(index * 1.73) * 52,
+    y: -60 - age * 290 + Math.sin(index * 1.73) * Math.min(52, heightStep * .9) + wobbleHeight,
     z: Math.cos(theta) * radius - 560,
-    size: 116 + (1 - age) * 52 + (index % 3) * 13,
+    size: 116 + (1 - age) * 52 + (index % 3) * 13 + wobbleSize,
+  };
+}
+
+// 太阳按真实时间走：6 点日出、正午最高（不到天顶，留出方位差）、18 点日落。
+// 返回值驱动天色和太阳在画面里的横向位置。
+export function skyAt(date = new Date()) {
+  const hour = date.getHours() + date.getMinutes() / 60;
+  const elevation = Math.sin((hour - 6) / 12 * Math.PI) * .74;
+  return {
+    // 太阳的方位角，用来跟视角相减——转过去太阳就移出画面
+    azimuth: (hour / 24) * 360 - 90,
+    day: clamp(elevation * 1.6 + .5, 0, 1),      // 0 深夜 → 1 正午
+    dusk: clamp(1 - Math.abs(elevation) * 3.2, 0, 1),  // 日出日落最高
+    elevation,
   };
 }
 
 const styles = `
-  :host{--sky-top:#91c9ee;--sky-mid:#d8e5f5;--sky-bottom:#f3d8d7;--ink:#504b68;display:block;min-height:420px;font-family:ui-sans-serif,system-ui,sans-serif;color:var(--ink)}
+  :host{--sky-top:#91c9ee;--sky-mid:#d8e5f5;--sky-bottom:#f3d8d7;--ink:#504b68;--sun-x:74%;--sun-y:14%;--sun-glow:#fff5cf8f;--star:0;display:block;min-height:420px;font-family:ui-sans-serif,system-ui,sans-serif;color:var(--ink)}
   *{box-sizing:border-box}.viewport{height:100%;min-height:420px;position:relative;overflow:hidden;border-radius:32px;perspective:1150px;cursor:grab;touch-action:none;outline:none;background:linear-gradient(180deg,var(--sky-top),var(--sky-mid) 52%,var(--sky-bottom));box-shadow:inset 0 1px 0 #ffffffd9,inset 0 -90px 140px #8b72ad24,0 30px 60px -42px #394b7180}
-  .viewport:active{cursor:grabbing}.viewport:before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 74% 14%,#fff 0 2%,#fff5cf8f 10%,transparent 29%),linear-gradient(125deg,#ffffff26,transparent 36%)}
+  .viewport:active{cursor:grabbing}.viewport:before{content:"";position:absolute;inset:0;transition:background .6s linear;background:radial-gradient(circle at var(--sun-x) var(--sun-y),#fff 0 2%,var(--sun-glow) 10%,transparent 34%),linear-gradient(125deg,#ffffff26,transparent 36%)}
+  /* 夜里才浮起来的星：白天 --star 为 0，整层不可见 */
+  .stars{position:absolute;inset:0;opacity:var(--star);transition:opacity 1.2s linear;pointer-events:none;background-image:radial-gradient(1.4px 1.4px at 12% 18%,#fff,transparent),radial-gradient(1.2px 1.2px at 31% 9%,#fff,transparent),radial-gradient(1.6px 1.6px at 47% 24%,#fff,transparent),radial-gradient(1.1px 1.1px at 64% 13%,#fff,transparent),radial-gradient(1.5px 1.5px at 78% 27%,#fff,transparent),radial-gradient(1.2px 1.2px at 88% 8%,#fff,transparent),radial-gradient(1.3px 1.3px at 21% 34%,#fff,transparent),radial-gradient(1.1px 1.1px at 55% 38%,#fff,transparent);animation:twinkle 5.5s ease-in-out infinite}
+  @keyframes twinkle{0%,100%{opacity:calc(var(--star)*.55)}50%{opacity:var(--star)}}
   .horizon{position:absolute;left:-10%;right:-10%;bottom:-85px;height:210px;border-radius:50% 50% 0 0;background:#ffffff52;filter:blur(18px);box-shadow:140px -45px 60px #ffffff38,-160px -15px 50px #ffffff42}.world{position:absolute;left:50%;top:52%;width:1px;height:1px;transform-style:preserve-3d;transform:translateZ(var(--zoom)) rotateX(var(--pitch)) rotateY(var(--yaw));transition:transform .08s linear}
   .cloud{position:absolute;left:calc(var(--size)/-2);top:calc(var(--size)*-.32);width:var(--size);height:calc(var(--size)*.58);padding:0;border:0;background:transparent;color:inherit;transform-style:preserve-3d;transform:translate3d(var(--x),var(--y),var(--z)) rotateY(var(--counter-yaw)) rotateX(var(--counter-pitch)) scale(calc(.72 + (1 - var(--age))*.28));opacity:calc(.2 + (1 - var(--age))*.8);cursor:pointer;animation:float calc(8s + var(--age)*5s) ease-in-out infinite;animation-delay:var(--delay)}
   .cloud:hover,.cloud.active{opacity:1;filter:brightness(1.08) drop-shadow(0 18px 18px #655b8e30);z-index:5}.volume{position:absolute;inset:0;transform-style:preserve-3d;filter:drop-shadow(0 0 calc(3px + var(--clarity)*8px) #ffffffeb)}
@@ -71,11 +107,11 @@ export class XinchaoDreamCloudmap extends HTMLElementBase {
   render() {
     if (!this.shadowRoot) return;
     const nodes = this.#dreams.map((dream, index) => {
-      const position = dreamPosition(index, this.#dreams.length);
+      const position = dreamPosition(index, this.#dreams.length, dream.id);
       const clarity = dream.lucidity == null ? .42 : dream.lucidity;
       return `<button class="cloud" data-id="${escapeHtml(dream.id)}" style="--x:${position.x}px;--y:${position.y}px;--z:${position.z}px;--size:${position.size}px;--age:${position.age};--clarity:${clarity};--delay:${-index * .73}s"><span class="volume"><i></i><i></i><i></i><i></i></span><span class="shadow"></span><span class="label"><b>${escapeHtml(dream.title)}</b><small>${escapeHtml(formatDate(dream.createdAt))}</small></span></button>`;
     }).join('');
-    this.shadowRoot.innerHTML = `<style>${styles}</style><div class="viewport" tabindex="0" role="application" aria-label="360度梦境云图"><div class="horizon"></div><div class="world">${nodes}</div><div class="hint">拖动环视 · 滚轮缩放</div><button class="reset" type="button">回到此刻</button></div>`;
+    this.shadowRoot.innerHTML = `<style>${styles}</style><div class="viewport" tabindex="0" role="application" aria-label="360度梦境云图"><div class="stars"></div><div class="horizon"></div><div class="world">${nodes}</div><div class="hint">拖动环视 · 滚轮缩放</div><button class="reset" type="button">回到此刻</button></div>`;
     const viewport = this.shadowRoot.querySelector('.viewport');
     viewport.addEventListener('pointerdown', event => this.pointerDown(event));
     viewport.addEventListener('pointermove', event => this.pointerMove(event));
@@ -97,6 +133,7 @@ export class XinchaoDreamCloudmap extends HTMLElementBase {
   updateView() {
     const world = this.shadowRoot?.querySelector('.world');
     if (!world) return;
+    this.paintSky();
     world.style.setProperty('--yaw', `${this.#yaw}deg`);
     world.style.setProperty('--pitch', `${this.#pitch}deg`);
     world.style.setProperty('--zoom', `${this.#zoom}px`);
@@ -104,6 +141,35 @@ export class XinchaoDreamCloudmap extends HTMLElementBase {
       node.style.setProperty('--counter-yaw', `${-this.#yaw}deg`);
       node.style.setProperty('--counter-pitch', `${-this.#pitch}deg`);
     });
+  }
+
+  // 天色随真实时间变，太阳随视角移动——转到背光那侧天会沉下来。
+  // 静态渐变在三维里是张贴纸，转一圈不变就穿帮了。
+  paintSky() {
+    const host = this.shadowRoot?.querySelector('.viewport');
+    if (!host) return;
+    const sky = skyAt();
+    // 太阳相对当前视角的角度：转过去就移出画面
+    const relative = ((sky.azimuth - this.#yaw) % 360 + 540) % 360 - 180;
+    const onScreen = clamp(50 + relative * 1.25, -30, 130);
+    const height = 46 - sky.elevation * 42;
+
+    const mix = (a, b, t) => a.map((value, index) => Math.round(value + (b[index] - value) * t));
+    const rgb = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+    const night = [[58, 62, 104], [86, 82, 128], [104, 96, 140]];
+    const noon  = [[145, 201, 238], [216, 229, 245], [243, 216, 215]];
+    const dusk  = [[132, 118, 176], [232, 176, 168], [250, 206, 168]];
+
+    const base = noon.map((color, index) => mix(night[index], color, sky.day));
+    const final = base.map((color, index) => mix(color, dusk[index], sky.dusk * .72));
+
+    host.style.setProperty('--sky-top', rgb(final[0]));
+    host.style.setProperty('--sky-mid', rgb(final[1]));
+    host.style.setProperty('--sky-bottom', rgb(final[2]));
+    host.style.setProperty('--sun-x', `${onScreen}%`);
+    host.style.setProperty('--sun-y', `${height}%`);
+    host.style.setProperty('--sun-glow', sky.dusk > .35 ? '#ffd3a8b0' : sky.day > .5 ? '#fff5cf8f' : '#cfd6ff5c');
+    host.style.setProperty('--star', String(Math.max(0, 1 - sky.day * 1.6).toFixed(2)));
   }
 
   pointerDown(event) {

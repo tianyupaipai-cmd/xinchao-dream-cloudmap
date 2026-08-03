@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>心潮梦境云图</title></head>
+<body style="margin:0;background:#e7edf5">
+  <xinchao-dream-cloudmap id="map" style="display:block;height:100svh"></xinchao-dream-cloudmap>
+  <script type="module">
+    import '../src/dream-cloudmap.js';
+    const now = Date.now();
+    document.querySelector('#map').dreams = Array.from({ length: 12 }, (_, index) => ({
+      id: `demo-${index}`,
+      createdAt: new Date(now - index * 86400000).toISOString(),
+      title: ['标着 OB 的箱子','玻璃罐里的光','安全承诺','海上的门'][index % 4],
+      dream: '演示数据，不会与真实梦境混在一起。',
+      residue: '醒来后还记得云层的光。',
+      lucidity: index % 3 === 0 ? .82 : index % 3 === 1 ? .48 : null,
+    }));
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "name": "@xinchao/dream-cloudmap",
+  "version": "0.1.0",
+  "description": "Framework-free 360° dream cloud map for private AI memory interfaces.",
+  "type": "module",
+  "exports": "./src/dream-cloudmap.js",
+  "files": ["src", "README.md", "LICENSE", "SECURITY.md"],
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": ["dream", "memory", "web-component", "3d", "xinchao"],
+  "license": "MIT"
+}
